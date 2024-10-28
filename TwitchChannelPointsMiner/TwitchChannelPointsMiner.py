@@ -89,7 +89,7 @@ class TwitchChannelPointsMiner:
         # Fixes TypeError: 'NoneType' object is not subscriptable
         if not username or username == "your-twitch-username":
             logger.error("Please edit your runner file (usually run.py) and try again.")
-        logger.info("https://github.com/rdavydov/Twitch-Channel-Points-Miner-v2")
+            logger.error("No username, exiting...")
             sys.exit(0)
 
         # This disables certificate verification and allows the connection to proceed, but also makes it vulnerable to man-in-the-middle (MITM) attacks.
@@ -142,7 +142,7 @@ class TwitchChannelPointsMiner:
         self.claim_drops_startup = claim_drops_startup
         self.priority = priority if isinstance(priority, list) else [priority]
 
-        self.streamers = []
+        self.streamers: list[Streamer] = []
         self.events_predictions = {}
         self.minute_watcher_thread = None
         self.sync_campaigns_thread = None
@@ -163,16 +163,14 @@ class TwitchChannelPointsMiner:
         logger.info(
             f"Twitch Channel Points Miner v2-{current_version} (fork by rdavydov)"
         )
-        logger.info(
-            "https://github.com/rdavydov/Twitch-Channel-Points-Miner-v2")
+        logger.info("https://github.com/rdavydov/Twitch-Channel-Points-Miner-v2")
 
         if github_version == "0.0.0":
             logger.error(
                 "Unable to detect if you have the latest version of this script"
             )
         elif current_version != github_version:
-            logger.info(
-                f"You are running version {current_version} of this script")
+            logger.info(f"You are running version {current_version} of this script")
             logger.info(f"The latest version on GitHub is {github_version}")
 
         for sign in [signal.SIGINT, signal.SIGSEGV, signal.SIGTERM]:
@@ -267,10 +265,10 @@ class TwitchChannelPointsMiner:
                     try:
                         streamer = (
                             streamers_dict[username]
-                        streamer.channel_id = self.twitch.get_channel_id(username)
+                            if isinstance(streamers_dict[username], Streamer) is True
+                            else Streamer(username)
                         )
-                        streamer.channel_id = self.twitch.get_channel_id(
-                            username)
+                        streamer.channel_id = self.twitch.get_channel_id(username)
                         streamer.settings = set_default_settings(
                             streamer.settings, Settings.streamer_settings
                         )
@@ -411,7 +409,7 @@ class TwitchChannelPointsMiner:
     def end(self, signum, frame):
         if not self.running:
             return
-            
+        
         logger.info("CTRL+C Detected! Please wait just a moment!")
 
         for streamer in self.streamers:
@@ -461,7 +459,7 @@ class TwitchChannelPointsMiner:
             extra={"emoji": ":hourglass:"},
         )
 
-        if self.events_predictions != {}:
+        if not Settings.logger.less and self.events_predictions != {}:
             print("")
             for event_id in self.events_predictions:
                 event = self.events_predictions[event_id]
@@ -490,12 +488,20 @@ class TwitchChannelPointsMiner:
                     self.streamers[streamer_index].channel_points
                     - self.original_streamers[streamer_index]
                 )
-                logger.info(
-                    f"{repr(self.streamers[streamer_index])}, Total Points Gained (after farming - before farming): {_millify(gained)}",
-                    extra={"emoji": ":robot:"},
+                
+                from colorama import Fore
+                streamer_highlight = Fore.YELLOW
+                
+                streamer_gain = (
+                    f"{streamer_highlight}{self.streamers[streamer_index]}{Fore.RESET}, Total Points Gained: {_millify(gained)}"
+                    if Settings.logger.less
+                    else f"{streamer_highlight}{repr(self.streamers[streamer_index])}{Fore.RESET}, Total Points Gained (after farming - before farming): {_millify(gained)}"
                 )
-                if self.streamers[streamer_index].history != {}:
-                    logger.info(
-                        f"{self.streamers[streamer_index].print_history()}",
-                        extra={"emoji": ":moneybag:"},
-                    )
+                
+                indent = ' ' * 25
+                streamer_history = '\n'.join(f"{indent}{history}" for history in self.streamers[streamer_index].print_history().split('; ')) 
+                
+                logger.info(
+                    f"{streamer_gain}\n{streamer_history}",
+                    extra={"emoji": ":moneybag:"},
+                )
