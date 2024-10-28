@@ -18,11 +18,8 @@ import validators
 from pathlib import Path
 from secrets import choice, token_hex
 from typing import Dict, Any
-
-# import json
 # from urllib.parse import quote
 # from base64 import urlsafe_b64decode
-
 # from datetime import datetime
 
 from TwitchChannelPointsMiner.classes.entities.Campaign import Campaign
@@ -53,6 +50,7 @@ from TwitchChannelPointsMiner.utils import (
 
 logger = logging.getLogger(__name__)
 JsonType = Dict[str, Any]
+
 
 class Twitch(object):
     __slots__ = [
@@ -139,6 +137,7 @@ class Twitch(object):
             # fixes AttributeError: 'NoneType' object has no attribute 'group'
             # headers = {"User-Agent": self.user_agent}
             from TwitchChannelPointsMiner.constants import USER_AGENTS
+
             headers = {"User-Agent": USER_AGENTS["Linux"]["FIREFOX"]}
 
             main_page_request = requests.get(
@@ -401,7 +400,7 @@ class Twitch(object):
 
                     elif (
                         prior in [Priority.POINTS_ASCENDING,
-                                  Priority.POINTS_DESCEDING]
+                                  Priority.POINTS_DESCENDING]
                         and len(streamers_watching) < 2
                     ):
                         items = [
@@ -413,7 +412,7 @@ class Twitch(object):
                             items,
                             key=lambda x: x["points"],
                             reverse=(
-                                True if prior == Priority.POINTS_DESCEDING else False
+                                True if prior == Priority.POINTS_DESCENDING else False
                             ),
                         )
                         streamers_watching += [item["index"]
@@ -493,19 +492,31 @@ class Twitch(object):
                         }
 
                         # Get signature and value using the post_gql_request method
-                        responsePlaybackAccessToken = self.post_gql_request(
-                            json_data)
-                        logger.debug(
-                            f"Sent PlaybackAccessToken request for {streamers[index]}"
-                        )
-                        signature: JsonType | None = responsePlaybackAccessToken["data"].get(
-                            'streamPlaybackAccessToken', {}).get("signature")
-                        value: JsonType | None = responsePlaybackAccessToken["data"].get(
-                            'streamPlaybackAccessToken', {}).get("value")
+                        try:
+                            responsePlaybackAccessToken = self.post_gql_request(
+                                json_data)
+                            logger.debug(
+                                f"Sent PlaybackAccessToken request for {streamers[index]}")
 
-                        if not signature or not value:
+                            if 'data' not in responsePlaybackAccessToken:
+                                logger.error(
+                                    f"Invalid response from Twitch: {responsePlaybackAccessToken}")
+                                continue
+
+                            streamPlaybackAccessToken = responsePlaybackAccessToken["data"].get(
+                                'streamPlaybackAccessToken', {})
+                            signature = streamPlaybackAccessToken.get(
+                                "signature")
+                            value = streamPlaybackAccessToken.get("value")
+
+                            if not signature or not value:
+                                logger.error(
+                                    f"Missing signature or value in Twitch response: {responsePlaybackAccessToken}")
+                                continue
+
+                        except Exception as e:
                             logger.error(
-                                f"Invalid response from Twitch: {responsePlaybackAccessToken}")
+                                f"Error fetching PlaybackAccessToken for {streamers[index]}: {str(e)}")
                             continue
 
                         # encoded_value = quote(json.dumps(value))
@@ -602,6 +613,7 @@ class Twitch(object):
                                                     "event": Events.DROP_STATUS,
                                                     "skip_telegram": True,
                                                     "skip_discord": True,
+                                                    "skip_webhook": True,
                                                     "skip_matrix": True,
                                                     "skip_gotify": True
                                                 },
@@ -618,7 +630,12 @@ class Twitch(object):
                                                 "\n".join(drop_messages),
                                                 Events.DROP_STATUS,
                                             )
-                                            if Settings.logger.gotify is not None:
+                                        if Settings.logger.webhook is not None:
+                                            Settings.logger.webhook.send(
+                                                "\n".join(drop_messages),
+                                                Events.DROP_STATUS,
+                                            )
+                                        if Settings.logger.gotify is not None:
                                             Settings.logger.gotify.send(
                                                 "\n".join(drop_messages),
                                                 Events.DROP_STATUS,
@@ -657,7 +674,7 @@ class Twitch(object):
             community_points = channel["self"]["communityPoints"]
             streamer.channel_points = community_points["balance"]
             streamer.activeMultipliers = community_points["activeMultipliers"]
-            
+
             if streamer.settings.community_goals is True:
                 streamer.community_goals = {
                     goal["id"]: CommunityGoal.from_gql(goal)
@@ -809,14 +826,13 @@ class Twitch(object):
 
     def __get_drops_dashboard(self, status=None):
         response = self.post_gql_request(GQLOperations.ViewerDropsDashboard)
+        campaigns = response["data"]["currentUser"]["dropCampaigns"] or []
+
+        if status is not None:
             campaigns = (
                 list(filter(lambda x: x["status"] ==
                      status.upper(), campaigns)) or []
             )
-
-        if status is not None:
-            campaigns = list(
-                filter(lambda x: x["status"] == status.upper(), campaigns)) or []
 
         return campaigns
 
@@ -911,7 +927,6 @@ class Twitch(object):
                 if (
                     campaigns_update == 0
                     # or ((time.time() - campaigns_update) / 60) > 60
-
                     # TEMPORARY AUTO DROP CLAIMING FIX
                     # 30 minutes instead of 60 minutes
                     or ((time.time() - campaigns_update) / 30) > 30
